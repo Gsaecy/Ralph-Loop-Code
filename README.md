@@ -14,6 +14,124 @@
 /ralph-loop "Your task description" --completion-promise "DONE" --max-iterations 50
 ```
 
+## 普通用户安装（无需 Node/npm）
+
+如果你的目标是让“只装了 VS Code 的用户”也能直接安装扩展，有两种常见分发方式：
+
+### 方式 1：发布到 VS Code Marketplace（推荐，真正一键）
+
+用户侧（无需 Node/npm）：
+
+1. 打开 VS Code → 扩展（Extensions）
+2. 搜索：`Ralph Loop`
+3. 点击 **Install**
+
+维护者侧（你需要做一次发布配置）：
+
+1. 在 VS Code Marketplace 创建 Publisher
+2. 把 [package.json](package.json) 里的 `publisher` 改成你的 Publisher ID（不要用 `local`）
+3. 安装/使用 `vsce` 登录并发布（需要 Marketplace PAT）：
+	- `npm install`
+	- `npx vsce login <your-publisher-id>`
+	- `npx vsce publish`
+
+发布完成后，任何人都可以通过 Marketplace 一键安装。
+
+### 方式 2：GitHub Releases 提供 VSIX（无需 Node/npm，适合不走 Marketplace）
+
+用户侧（无需 Node/npm）：
+
+1. 打开你的 GitHub 仓库 → Releases：
+	- https://github.com/Gsaecy/Ralph-Loop-Code/releases
+2. 下载发布资产里的 `ralph-loop-*.vsix`
+3. VS Code 命令面板 → `Extensions: Install from VSIX...` → 选择该文件
+
+本仓库已提供 GitHub Actions 工作流来自动产出 VSIX（见 [.github/workflows/release-vsix.yml](.github/workflows/release-vsix.yml)）：
+
+- 当你 push tag（例如 `v0.0.2`）时，会自动构建并在 Release 中附带 VSIX。
+
+维护者发布 VSIX（示例）：
+
+```bash
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+## 从 GitHub 源码本地安装/运行（推荐给开源用户）
+
+只要能运行 Node.js + VS Code，就可以直接从你的 Git 仓库本地构建并安装该扩展。
+
+### 前置条件
+
+- Git
+- Node.js（建议使用当前 LTS 版本）
+- VS Code（建议 1.94+）
+
+### 1) 克隆并进入扩展目录
+
+在命令行中执行（把 URL 换成你的仓库地址）：
+
+```bash
+git clone https://github.com/Gsaecy/Ralph-Loop-Code.git
+cd Ralph-Loop-Code
+```
+
+关键点：后续所有 `npm run ...` 都必须在“包含 package.json 的目录”执行。
+
+### 2) 安装依赖 + 编译
+
+```bash
+npm install
+npm run compile
+```
+
+### 3) 方式 A：用 Extension Host 运行（开发调试）
+
+适合贡献代码/调试逻辑：
+
+1. 用 VS Code 打开该文件夹
+2. 按 `F5`（Run Extension），会启动一个新的 **Extension Development Host** 窗口
+3. 在新窗口里按 `Ctrl+Shift+P`，运行命令：
+	- `Ralph Loop: 开启循环 (/ralph-loop)`
+	- `Ralph Loop: 取消循环 (/cancel-ralph)`
+
+### 4) 方式 B：打包成 VSIX 并安装到日常 VS Code
+
+适合“普通用户从源码安装”：
+
+```bash
+npm install
+npm run package
+```
+
+会在当前目录生成一个 `ralph-loop-*.vsix` 文件。
+
+安装方法：
+
+- VS Code 命令面板 → `Extensions: Install from VSIX...` → 选择该 `*.vsix`
+
+或者使用一键脚本（需要命令行可用 `code`）：
+
+```bash
+npm run package:install
+```
+
+如果系统提示找不到 `code` 命令：
+- Windows：确保安装 VS Code 时勾选了 “Add to PATH”，或重开终端
+- macOS：VS Code 中运行 `Shell Command: Install 'code' command in PATH`
+
+### 常见问题
+
+#### Q: npm 报错 `Missing script: "package"`
+
+你很可能在错误的目录运行了命令。请先确认当前目录下有 `package.json`，并执行：
+
+```bash
+npm run
+```
+
+看脚本列表里是否存在 `package`。
+
 ## 执行方式（更接近 Ralph loop）
 
 - 扩展会在工作区创建状态文件：`.claude/ralph-loop.local.md`，记录迭代次数与参数。
