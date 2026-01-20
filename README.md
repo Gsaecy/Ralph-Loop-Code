@@ -42,6 +42,16 @@
 
 只有当模型**整段回复的最后一行**（去掉末尾空行后）与 `--completion-promise` 的字符串**完全一致**时，循环才会退出。
 
+## 更必收敛的提示词建议
+
+1) **写成可验证的要求**
+
+尽量把目标写成“能被机器验收”的形式（例如：生成某个文件、文件包含某段文本、错误数为 0、Task 必须通过等）。扩展会在拆分阶段生成 `criteriaChecks` 并用 verifier 强制检查；若缺少可验证标准，verifier 会拒绝放行 completion-promise。
+
+2) **优先提供 VS Code Tasks 作为验收手段**
+
+如果你的项目有 `.vscode/tasks.json`（例如 `build`/`test`），模型会优先使用 `vscode.listTasks`/`vscode.runTask` 运行任务，并要求 `exitCode === 0` 才能通过验收；这比“主观判断完成”更稳定，也更不容易跑偏。
+
 ## 开发
 
 ```bash
