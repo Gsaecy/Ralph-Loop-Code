@@ -60,3 +60,22 @@ npm run compile
 ```
 
 按 `F5` 启动 Extension Host 调试。
+
+## 直接安装到日常 VS Code（VSIX）
+
+在扩展项目根目录执行：
+
+```bash
+npm install
+npm run package
+```
+
+会生成一个 `*.vsix` 文件，然后用 VS Code 安装：
+
+- 命令面板 → `Extensions: Install from VSIX...`
+
+也可以用脚本一键打包+安装（需要命令行可用 `code`）：
+
+```bash
+npm run package:install
+```

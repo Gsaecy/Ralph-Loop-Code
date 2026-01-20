@@ -4,6 +4,10 @@
   "description": "Split AI development instructions and run iterative Ralph-loop style execution.",
   "version": "0.0.1",
   "publisher": "local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gsaecy/Ralph-Loop-Code.git"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },
@@ -31,11 +35,14 @@
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
     "lint": "eslint . --ext .ts",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --skip-license",
+    "package:install": "npm run package && node scripts/install-vsix.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.94.0",
+    "@vscode/vsce": "^3.3.2",
     "eslint": "^9.10.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.6.0"
