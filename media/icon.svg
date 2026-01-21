@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#ffffff"/>
+
+  <!-- Infinity mark -->
+  <path d="M 80 128
+           C 80 96 112 96 128 128
+           C 144 160 176 160 176 128
+           C 176 96 144 96 128 128
+           C 112 160 80 160 80 128"
+        fill="none" stroke="#000000" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Left brace -->
+  <path d="M 70 44
+           C 48 44 48 70 48 84
+           C 48 98 42 106 30 110
+           C 42 114 48 122 48 136
+           C 48 150 42 158 30 162
+           C 42 166 48 174 48 188
+           C 48 202 48 228 70 228"
+        fill="none" stroke="#000000" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right brace (mirror) -->
+  <path d="M 186 44
+           C 208 44 208 70 208 84
+           C 208 98 214 106 226 110
+           C 214 114 208 122 208 136
+           C 208 150 214 158 226 162
+           C 214 166 208 174 208 188
+           C 208 202 208 228 186 228"
+        fill="none" stroke="#000000" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

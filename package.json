@@ -3,6 +3,7 @@
   "displayName": "Ralph Loop",
   "description": "Split AI development instructions and run iterative Ralph-loop style execution.",
   "version": "0.0.3",
+  "icon": "media/icon.png",
   "publisher": "local",
   "repository": {
     "type": "git",
@@ -35,8 +36,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
     "lint": "eslint . --ext .ts",
+    "generate:icon": "node scripts/generate-icon.js",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package --skip-license",
+    "package": "npm run generate:icon && vsce package --skip-license",
     "package:install": "npm run package && node scripts/install-vsix.js"
   },
   "devDependencies": {
@@ -44,6 +46,7 @@
     "@types/vscode": "^1.94.0",
     "@vscode/vsce": "^3.3.2",
     "eslint": "^9.10.0",
+    "sharp": "^0.34.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.6.0"
   }
