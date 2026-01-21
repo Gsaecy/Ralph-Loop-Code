@@ -2,7 +2,7 @@
   "name": "ralph-loop",
   "displayName": "Ralph Loop",
   "description": "Split AI development instructions and run iterative Ralph-loop style execution.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "icon": "media/icon.png",
   "publisher": "local",
   "repository": {
