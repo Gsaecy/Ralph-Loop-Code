@@ -1,6 +1,15 @@
-# Ralph Loop (VS Code Extension)
+# Ralph Loop (VS Code Extension) v0.0.5
 
 把一段 AI 开发指令拆分为「可执行的单一命令 + 对应验收标准」，并用 Ralph loop 式的迭代流程执行：不达标就把“错误/偏差”当提示继续下一轮，直到严格命中 completion-promise 或达到最大迭代次数。
+
+## ✨ v0.0.5 新功能
+
+- **多模型支持**：除了 GitHub Copilot，现支持 OpenAI‑兼容接口（如 DeepSeek）
+- **插件系统**：可在 `.ralph-loop/plugins/` 下添加自定义工具与验证器
+- **工具调用（OpenAI‑兼容模式）**：DeepSeek 等外部模型也能像 Copilot 一样使用工具读/写/搜索
+- **更多验收检查**：新增 HTTP 状态码、shell 输出、JSONPath、正则匹配等验证类型
+- **历史记录与回放**：每次迭代保存快照，支持查看与回放
+- **进度反馈**：状态栏显示进度，可取消的进度通知
 
 ## 使用
 
@@ -38,18 +47,20 @@
 
 发布完成后，任何人都可以通过 Marketplace 一键安装。
 
-### 方式 2：GitHub Releases 提供 VSIX（无需 Node/npm，适合不走 Marketplace）
+### 方式 2：GitHub Releases 提供 VSIX（无需 Node/npm，推荐）
 
 用户侧（无需 Node/npm）：
 
-1. 打开你的 GitHub 仓库 → Releases：
+1. 打开本仓库的 Releases 页面：
 	- https://github.com/Gsaecy/Ralph-Loop-Code/releases
-2. 下载发布资产里的 `ralph-loop-*.vsix`
+2. 下载最新版本的 `ralph-loop-*.vsix` 文件（例如 `ralph-loop-0.0.5.vsix`）
 3. VS Code 命令面板 → `Extensions: Install from VSIX...` → 选择该文件
 
-本仓库已提供 GitHub Actions 工作流来自动产出 VSIX（见 [.github/workflows/release-vsix.yml](.github/workflows/release-vsix.yml)）：
+**当前最新版本**：`v0.0.5`（[下载链接](https://github.com/Gsaecy/Ralph-Loop-Code/releases/latest)）
 
-- 当你 push tag（例如 `v0.0.2`）时，会自动构建并在 Release 中附带 VSIX。
+本仓库已配置 GitHub Actions 自动构建 VSIX（见 [.github/workflows/release-vsix.yml](.github/workflows/release-vsix.yml)）：
+
+- 当你 push tag（例如 `v0.0.5`）时，会自动构建并在 Release 中附带 VSIX。
 
 维护者发布 VSIX（示例）：
 
@@ -148,7 +159,35 @@ npm run
 API Key 通过命令安全保存（SecretStorage）：
 - `Ralph Loop: 设置 OpenAI-兼容 API Key`
 
-> 备注：openaiCompatible 模式下目前使用 `<edits>...</edits>` 方式让模型输出覆盖写入的文件内容；不支持“工具自动调用”那种读文件/搜索的交互能力（后续可以继续增强）。
+### OpenAI‑Compatible 模式下的工具调用
+
+从 v0.0.6 开始，openaiCompatible 模式也支持工具调用（Tool Calling），使用 OpenAI‑Compatible 的 function calling 协议。这意味着：
+
+**支持的功能：**
+- ✅ 完整的工具调用循环（与 copilot 模式相同）
+- ✅ 支持所有现有工具：`workspace.readFile`、`workspace.writeFile`、`workspace.listFiles`、`workspace.search`、`workspace.getDiagnostics`、`vscode.listTasks`、`vscode.runTask`、`loop.verify`
+- ✅ 自动工具调用与结果回灌
+- ✅ 最多 30 轮工具调用循环
+
+**使用要求：**
+1. 目标 API 必须支持 OpenAI‑Compatible 的 `tools` 参数和 `tool_calls` 响应格式
+2. 模型需要支持 function calling 功能（如 DeepSeek‑Chat、GPT‑4‑Turbo 等）
+3. API Key 需要正确设置
+
+**工作原理：**
+1. 扩展将 `PrivateTool` 接口转换为 OpenAI‑Compatible 的 `tools` 参数格式
+2. 模型响应中的 `tool_calls` 会被解析并执行对应工具
+3. 工具结果以 `tool` 角色消息回灌给模型
+4. 循环继续直到模型输出最终文本或无工具调用
+
+**向后兼容：**
+- 如果模型不支持工具调用或返回纯文本，扩展会回退到 `<edits>...</edits>` 模式
+- 现有的 `<edits>` 标签解析逻辑仍然有效
+
+**注意事项：**
+- 不同 API 提供商对工具调用的支持程度可能不同
+- 工具调用会增加 API 调用次数（每次工具调用都需要一次 API 请求）
+- 确保 API 提供商支持足够的上下文长度以容纳工具调用历史
 
 ## 运行进度反馈（新增）
 
