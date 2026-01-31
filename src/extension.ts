@@ -174,7 +174,31 @@ function extractJsonArrayFromEditsBlock(text: string): EditFile[] {
 	}
 }
 
-async function pickChatModel(context: vscode.ExtensionContext): Promise<vscode.LanguageModelChat> {
+type ProviderKind = 'copilot' | 'openaiCompatible';
+
+type ChatRole = 'system' | 'user' | 'assistant';
+
+type PlainChatMessage = { role: ChatRole; content: string };
+
+type ChatProvider = {
+	kind: ProviderKind;
+	name: string;
+	requestText: (messages: PlainChatMessage[], token: vscode.CancellationToken) => Promise<string>;
+	requestWithTools?: (
+		baseMessages: vscode.LanguageModelChatMessage[],
+		tools: PrivateTool[],
+		token: vscode.CancellationToken,
+		output?: vscode.OutputChannel
+	) => Promise<string>;
+};
+
+function getProviderKind(): ProviderKind {
+	const cfg = vscode.workspace.getConfiguration('ralphLoop');
+	const v = String(cfg.get('provider', 'copilot')) as ProviderKind;
+	return v === 'openaiCompatible' ? 'openaiCompatible' : 'copilot';
+}
+
+async function pickCopilotChatModel(context: vscode.ExtensionContext): Promise<vscode.LanguageModelChat> {
 	// Must be called in response to a user action.
 	const access = context.languageModelAccessInformation;
 	if (!access.canSendRequest) {
@@ -188,7 +212,7 @@ async function pickChatModel(context: vscode.ExtensionContext): Promise<vscode.L
 	return models[0];
 }
 
-async function requestText(
+async function requestCopilotText(
 	model: vscode.LanguageModelChat,
 	messages: vscode.LanguageModelChatMessage[],
 	token: vscode.CancellationToken
@@ -199,6 +223,83 @@ async function requestText(
 		text += part;
 	}
 	return text;
+}
+
+async function requestOpenAICompatibleText(
+	context: vscode.ExtensionContext,
+	plainMessages: PlainChatMessage[],
+	token: vscode.CancellationToken
+): Promise<string> {
+	const cfg = vscode.workspace.getConfiguration('ralphLoop');
+	const baseUrl = String(cfg.get('openaiCompatible.baseUrl', 'https://api.deepseek.com/v1')).replace(/\/$/, '');
+	const model = String(cfg.get('openaiCompatible.model', 'deepseek-chat'));
+	const temperature = Number(cfg.get('openaiCompatible.temperature', 0.2));
+
+	const apiKey = await context.secrets.get('ralphLoop.openaiCompatible.apiKey');
+	if (!apiKey) {
+		throw new Error('未设置 OpenAI-兼容 API Key。请运行命令：Ralph Loop: 设置 OpenAI-兼容 API Key');
+	}
+
+	if (token.isCancellationRequested) throw new Error('已取消');
+
+	const url = `${baseUrl}/chat/completions`;
+	const res = await fetch(url, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${apiKey}`,
+		},
+		body: JSON.stringify({
+			model,
+			messages: plainMessages,
+			temperature: Number.isFinite(temperature) ? temperature : 0.2,
+			stream: false,
+		}),
+	});
+
+	if (!res.ok) {
+		const body = await res.text().catch(() => '');
+		throw new Error(`OpenAI-兼容请求失败：HTTP ${res.status} ${res.statusText}${body ? `\n${body}` : ''}`);
+	}
+
+	const data = (await res.json()) as any;
+	const text = data?.choices?.[0]?.message?.content;
+	if (typeof text !== 'string') {
+		throw new Error('OpenAI-兼容接口返回格式不符合预期（缺少 choices[0].message.content）。');
+	}
+	return text;
+}
+
+async function createChatProvider(context: vscode.ExtensionContext): Promise<ChatProvider> {
+	const kind = getProviderKind();
+	if (kind === 'openaiCompatible') {
+		const cfg = vscode.workspace.getConfiguration('ralphLoop');
+		const model = String(cfg.get('openaiCompatible.model', 'deepseek-chat'));
+		return {
+			kind,
+			name: `openaiCompatible:${model}`,
+			requestText: (msgs, token) => requestOpenAICompatibleText(context, msgs, token),
+		};
+	}
+
+	const model = await pickCopilotChatModel(context);
+	return {
+		kind: 'copilot',
+		name: 'copilot',
+		requestText: (msgs, token) =>
+			requestCopilotText(
+				model,
+				msgs.map((m) =>
+					m.role === 'system'
+						? vscode.LanguageModelChatMessage.User(`[system]\n${m.content}`)
+						: m.role === 'assistant'
+							? vscode.LanguageModelChatMessage.Assistant(m.content)
+							: vscode.LanguageModelChatMessage.User(m.content)
+				),
+				token
+			),
+		requestWithTools: (baseMessages, tools, token, output) => requestWithTools(model, baseMessages, tools, token, output),
+	};
 }
 
 type PrivateTool = {
@@ -356,39 +457,38 @@ async function openWorkspaceFile(relativePath: string): Promise<void> {
 }
 
 async function decomposePrompt(
-	context: vscode.ExtensionContext,
-	model: vscode.LanguageModelChat,
+	provider: ChatProvider,
 	prompt: string,
 	token: vscode.CancellationToken
 ): Promise<DecompositionResult> {
-	const messages: vscode.LanguageModelChatMessage[] = [
-		vscode.LanguageModelChatMessage.User(
-			[
-				'[system]',
-				'你是一个“开发指令拆分器”。',
-				'把用户指令拆成多个“单一具体命令 + 对应可验证的验收标准”。',
-				'如果指令不明确或验收标准不明确，必须输出 clarifications 列表。',
-				'验收标准必须尽量给出可机器验证的 criteriaChecks（否则容易不收敛）。',
-				'只输出 JSON，不要额外文本。',
-				'JSON Schema:',
-				'{',
-				'  "tasks": [ { "id": "T1", "instruction": "...", "completionCriteria": "...", "criteriaChecks": [ ... ], "order": 1 } ],',
-				'  "clarifications": [ { "question": "...", "why": "..." } ]',
-				'}',
-				'',
-				'criteriaChecks 支持类型：',
-				'- {"type":"diagnostics","maxErrors":0}',
-				'- {"type":"fileExists","path":"src/app.ts"}',
-				'- {"type":"fileContains","path":"src/app.ts","text":"export function foo"}',
-				'- {"type":"globExists","glob":"src/**/*.ts","minCount":1}',
-				'- {"type":"vscodeTask","label":"build","timeoutMs":600000}',
-				'- {"type":"userConfirm","question":"请确认 UI 是否正常显示"}',
-			].join('\n')
-		),
-		vscode.LanguageModelChatMessage.User(prompt),
-	];
+	const system = [
+		'你是一个“开发指令拆分器”。',
+		'把用户指令拆成多个“单一具体命令 + 对应可验证的验收标准”。',
+		'如果指令不明确或验收标准不明确，必须输出 clarifications 列表。',
+		'验收标准必须尽量给出可机器验证的 criteriaChecks（否则容易不收敛）。',
+		'只输出 JSON，不要额外文本。',
+		'JSON Schema:',
+		'{',
+		'  "tasks": [ { "id": "T1", "instruction": "...", "completionCriteria": "...", "criteriaChecks": [ ... ], "order": 1 } ],',
+		'  "clarifications": [ { "question": "...", "why": "..." } ]',
+		'}',
+		'',
+		'criteriaChecks 支持类型：',
+		'- {"type":"diagnostics","maxErrors":0}',
+		'- {"type":"fileExists","path":"src/app.ts"}',
+		'- {"type":"fileContains","path":"src/app.ts","text":"export function foo"}',
+		'- {"type":"globExists","glob":"src/**/*.ts","minCount":1}',
+		'- {"type":"vscodeTask","label":"build","timeoutMs":600000}',
+		'- {"type":"userConfirm","question":"请确认 UI 是否正常显示"}',
+	].join('\n');
 
-	const text = await requestText(model, messages, token);
+	const text = await provider.requestText(
+		[
+			{ role: 'system', content: system },
+			{ role: 'user', content: prompt },
+		],
+		token
+	);
 	const result = safeJsonParseObject<DecompositionResult>(text);
 	result.tasks = Array.isArray(result.tasks) ? result.tasks : [];
 	result.clarifications = Array.isArray(result.clarifications) ? result.clarifications : [];
@@ -961,10 +1061,17 @@ async function runRalphLoop(
 	output.appendLine(`[start] maxIterations=${config.maxIterations}, completionPromise="${config.completionPromise}"`);
 	output.appendLine('[info] 注意：第一次迭代往往不正确；未达标会自动继续。');
 
+	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	statusBar.tooltip = 'Ralph Loop 运行状态';
+	statusBar.show();
+
 	try {
 		await writeStateFile(config, 1);
-		const model = await pickChatModel(context);
-		const decomposition = await decomposePrompt(context, model, config.prompt, cts.token);
+		const provider = await createChatProvider(context);
+		statusBar.text = `$(sync~spin) Ralph Loop: decompose · ${provider.name}`;
+		output.appendLine(`[model] provider=${provider.name}`);
+
+		const decomposition = await decomposePrompt(provider, config.prompt, cts.token);
 		const tasks = sortTasks(decomposition.tasks);
 
 		if (decomposition.clarifications.length > 0 || tasks.length === 0) {
@@ -1012,76 +1119,118 @@ async function runRalphLoop(
 		const loopRuntime: LoopRuntime = { iteration: 0, cache: { taskRuns: new Map() } };
 		const privateTools = createPrivateTools(() => tasks, () => loopRuntime, output);
 
-		for (let iteration = 1; iteration <= config.maxIterations; iteration++) {
-			if (cts.token.isCancellationRequested) {
-				output.appendLine('[cancelled]');
-				vscode.window.showInformationMessage('Ralph Loop 已取消。');
-				await deleteStateFile();
-				return;
-			}
+		await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: `Ralph Loop (${provider.name})`,
+				cancellable: true,
+			},
+			async (progress, uiToken) => {
+				uiToken.onCancellationRequested(() => {
+					cts.cancel();
+				});
 
-			loopRuntime.iteration = iteration;
-			loopRuntime.cache = { taskRuns: new Map() };
+				for (let iteration = 1; iteration <= config.maxIterations; iteration++) {
+					progress.report({
+						message: `迭代 ${iteration}/${config.maxIterations}`,
+						increment: 100 / config.maxIterations,
+					});
+					statusBar.text = `$(sync~spin) Ralph Loop: ${iteration}/${config.maxIterations} · ${provider.name}`;
 
-			await writeStateFile(config, iteration);
+					if (cts.token.isCancellationRequested) {
+						output.appendLine('[cancelled]');
+						vscode.window.showInformationMessage('Ralph Loop 已取消。');
+						await deleteStateFile();
+						return;
+					}
 
-			output.appendLine(`\n[iteration ${iteration}/${config.maxIterations}]`);
-			const diag = vscode.languages.getDiagnostics();
-			let diagSummary = `diagnostics: ${diag.reduce((acc, [, list]) => acc + list.length, 0)}`;
-			try {
-				const res = await privateTools
-					.find((t) => t.name === 'workspace.getDiagnostics')!
-					.invoke({}, cts.token);
-				diagSummary = JSON.stringify(res);
-			} catch {
-				// ignore
-			}
+					loopRuntime.iteration = iteration;
+					loopRuntime.cache = { taskRuns: new Map() };
 
-			const execPrompt = [
-				'你将对当前 VS Code 工作区进行修改来完成任务。',
-				'你会在每次迭代收到相同的原始指令，但会带上上一次失败信息。',
-				'必须严格按“任务拆分 + 验收标准”推进，并用工具来读/写/搜索/诊断。',
-				'重要：只有当扩展侧验证器通过（loop.verify 返回 allPassed=true）时，你才可以输出 completion-promise。',
-				'否则一旦你提前输出 completion-promise，会被判定为失败并进入下一轮。',
-				'',
-				'如果需要修改文件，调用工具 workspace.writeFile（覆盖写入）。',
-				'如果需要阅读/定位，调用 workspace.readFile / workspace.search / workspace.listFiles。',
-				'如果需要验证，优先使用 vscode.listTasks / vscode.runTask 运行工作区 Task（例如 build/test）。',
-				'也可以调用 workspace.getDiagnostics 获取错误/警告。',
-				`最后一行严格规则：只有当你确信所有验收标准都满足时，才输出：${config.completionPromise}`,
-				'否则最后一行输出任意其它内容（不要等于 completion-promise）。',
-				'',
-				'--- 原始指令 ---',
-				config.prompt,
-				'',
-				'--- 任务拆分（必须按顺序完成）---',
-				...tasks.map((t) => `(${t.order}) ${t.id}\n- instruction: ${t.instruction}\n- criteria: ${t.completionCriteria}`),
-				'',
-				'--- 当前诊断（供 debug）---',
-				diagSummary,
-				'',
-				'--- 上一次失败/偏差信息（用于 debug）---',
-				lastFailure || '(none)',
-			].join('\n');
+					await writeStateFile(config, iteration);
 
-			let text = '';
-			try {
-				text = await requestWithTools(
-					model,
-					[
-						vscode.LanguageModelChatMessage.User(`[system] 这是第 ${iteration} 次迭代。`),
-						vscode.LanguageModelChatMessage.User(execPrompt),
-					],
-					privateTools,
-					cts.token,
-					output
-				);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				lastFailure = `模型请求失败：${msg}`;
-				output.appendLine(`[error] ${lastFailure}`);
-				continue;
-			}
+					output.appendLine(`\n[iteration ${iteration}/${config.maxIterations}]`);
+					const diag = vscode.languages.getDiagnostics();
+					let diagSummary = `diagnostics: ${diag.reduce((acc, [, list]) => acc + list.length, 0)}`;
+					try {
+						const res = await privateTools
+							.find((t) => t.name === 'workspace.getDiagnostics')!
+							.invoke({}, cts.token);
+						diagSummary = JSON.stringify(res);
+					} catch {
+						// ignore
+					}
+
+					const basePromptLines = [
+						'你将对当前 VS Code 工作区进行修改来完成任务。',
+						'你会在每次迭代收到相同的原始指令，但会带上上一次失败信息。',
+						'必须严格按“任务拆分 + 验收标准”推进。',
+						'重要：只有当扩展侧验证器通过（allPassed=true）时，你才可以输出 completion-promise。',
+						'否则一旦你提前输出 completion-promise，会被判定为失败并进入下一轮。',
+						'',
+						`最后一行严格规则：只有当你确信所有验收标准都满足时，才输出：${config.completionPromise}`,
+						'否则最后一行输出任意其它内容（不要等于 completion-promise）。',
+						'',
+						'--- 原始指令 ---',
+						config.prompt,
+						'',
+						'--- 任务拆分（必须按顺序完成）---',
+						...tasks.map((t) => `(${t.order}) ${t.id}\n- instruction: ${t.instruction}\n- criteria: ${t.completionCriteria}`),
+						'',
+						'--- 当前诊断（供 debug）---',
+						diagSummary,
+						'',
+						'--- 上一次失败/偏差信息（用于 debug）---',
+						lastFailure || '(none)',
+					];
+
+					let text = '';
+					try {
+						if (provider.requestWithTools) {
+							const execPrompt = [
+								...basePromptLines,
+								'',
+								'你可以使用工具来读/写/搜索/诊断。',
+								'如果需要修改文件，调用工具 workspace.writeFile（覆盖写入）。',
+								'如果需要阅读/定位，调用 workspace.readFile / workspace.search / workspace.listFiles。',
+								'如果需要验证，优先使用 vscode.listTasks / vscode.runTask 运行工作区 Task（例如 build/test）。',
+								'也可以调用 workspace.getDiagnostics 获取错误/警告。',
+							].join('\n');
+
+							text = await provider.requestWithTools(
+								[
+									vscode.LanguageModelChatMessage.User(`[system] 这是第 ${iteration} 次迭代。`),
+									vscode.LanguageModelChatMessage.User(execPrompt),
+								],
+								privateTools,
+								cts.token,
+								output
+							);
+						} else {
+							const execPrompt = [
+								...basePromptLines,
+								'',
+								'你不能调用任何工具，也无法直接读取工作区文件内容。',
+								'你只能通过“输出要覆盖写入的文件内容”来尝试修复问题。',
+								'如果需要修改文件，请在回复中输出一个 <edits>...</edits> 标签，内部是严格 JSON 数组：',
+								'[{"path":"相对路径","content":"文件全文"}]',
+								'不要输出其它格式的补丁。扩展会应用 <edits> 后再进行验收与下一轮。',
+							].join('\n');
+
+							text = await provider.requestText(
+								[
+									{ role: 'system', content: `这是第 ${iteration} 次迭代。` },
+									{ role: 'user', content: execPrompt },
+								],
+								cts.token
+							);
+						}
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						lastFailure = `模型请求失败：${msg}`;
+						output.appendLine(`[error] ${lastFailure}`);
+						continue;
+					}
 
 			// Backward compatibility: if model still emits <edits>, apply them.
 			const edits = extractJsonArrayFromEditsBlock(text);
@@ -1141,12 +1290,16 @@ async function runRalphLoop(
 				'扩展侧验证器报告：',
 				JSON.stringify(report, null, 2),
 			].join('\n');
-		}
+				}
 
-		output.appendLine('[stop] 达到最大循环次数，仍未命中 completion-promise');
-		vscode.window.showWarningMessage('Ralph Loop：达到最大循环次数，仍未完成。请检查计划或提高验收标准可验证性。');
+				output.appendLine('[stop] 达到最大循环次数，仍未命中 completion-promise');
+				vscode.window.showWarningMessage('Ralph Loop：达到最大循环次数，仍未完成。请检查计划或提高验收标准可验证性。');
+			}
+		);
+
 	} finally {
 		await deleteStateFile();
+		statusBar.dispose();
 		activeRun?.cts.dispose();
 		activeRun = undefined;
 	}
@@ -1184,6 +1337,20 @@ export function activate(context: vscode.ExtensionContext) {
 			activeRun.cts.cancel();
 			await deleteStateFile();
 			vscode.window.showInformationMessage('已请求取消 Ralph Loop（等待当前迭代结束）。');
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('ralphLoop.setApiKey', async () => {
+			const key = await vscode.window.showInputBox({
+				prompt: '输入 OpenAI-兼容 API Key（将安全地保存到 VS Code SecretStorage）',
+				placeHolder: 'sk-... ',
+				password: true,
+				ignoreFocusOut: true,
+			});
+			if (!key) return;
+			await context.secrets.store('ralphLoop.openaiCompatible.apiKey', key.trim());
+			vscode.window.showInformationMessage('Ralph Loop：已保存 OpenAI-兼容 API Key。');
 		})
 	);
 }

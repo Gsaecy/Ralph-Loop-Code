@@ -7,6 +7,7 @@
 命令面板中运行：
 - `Ralph Loop: 开启循环 (/ralph-loop)`
 - `Ralph Loop: 取消循环 (/cancel-ralph)`
+- `Ralph Loop: 设置 OpenAI-兼容 API Key`（可用于 DeepSeek / 其它 OpenAI-兼容接口）
 
 启动时可直接粘贴类似 Claude Code 的语法：
 
@@ -131,6 +132,28 @@ npm run
 ```
 
 看脚本列表里是否存在 `package`。
+
+## 模型/Provider 选择（新增）
+
+本扩展支持两种 provider：
+
+1) **copilot**（默认）：使用 VS Code Language Model API（通常是 GitHub Copilot），支持自动工具调用（读/写/搜索/跑 Task）。
+2) **openaiCompatible**：通过 OpenAI-兼容的 Chat Completions 接口调用模型（例如 DeepSeek）。
+
+配置入口：VS Code Settings → 搜索 `Ralph Loop`：
+- `ralphLoop.provider`: `copilot` | `openaiCompatible`
+- `ralphLoop.openaiCompatible.baseUrl`: 默认为 `https://api.deepseek.com/v1`
+- `ralphLoop.openaiCompatible.model`: 默认为 `deepseek-chat`
+
+API Key 通过命令安全保存（SecretStorage）：
+- `Ralph Loop: 设置 OpenAI-兼容 API Key`
+
+> 备注：openaiCompatible 模式下目前使用 `<edits>...</edits>` 方式让模型输出覆盖写入的文件内容；不支持“工具自动调用”那种读文件/搜索的交互能力（后续可以继续增强）。
+
+## 运行进度反馈（新增）
+
+- 状态栏会显示当前迭代进度与 provider
+- 运行时会弹出可取消的进度通知（取消会请求停止循环）
 
 ## 执行方式（更接近 Ralph loop）
 

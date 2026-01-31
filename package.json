@@ -2,7 +2,7 @@
   "name": "ralph-loop",
   "displayName": "Ralph Loop",
   "description": "Split AI development instructions and run iterative Ralph-loop style execution.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "icon": "media/icon.png",
   "publisher": "local",
   "repository": {
@@ -17,7 +17,8 @@
   ],
   "activationEvents": [
     "onCommand:ralphLoop.start",
-    "onCommand:ralphLoop.cancel"
+    "onCommand:ralphLoop.cancel",
+    "onCommand:ralphLoop.setApiKey"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -29,8 +30,40 @@
       {
         "command": "ralphLoop.cancel",
         "title": "Ralph Loop: 取消循环 (/cancel-ralph)"
+      },
+      {
+        "command": "ralphLoop.setApiKey",
+        "title": "Ralph Loop: 设置 OpenAI-兼容 API Key"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Ralph Loop",
+      "properties": {
+        "ralphLoop.provider": {
+          "type": "string",
+          "default": "copilot",
+          "enum": ["copilot", "openaiCompatible"],
+          "description": "选择模型提供方：copilot 使用 VS Code Language Model API；openaiCompatible 使用 OpenAI-兼容的 Chat Completions 接口（如 DeepSeek）。"
+        },
+        "ralphLoop.openaiCompatible.baseUrl": {
+          "type": "string",
+          "default": "https://api.deepseek.com/v1",
+          "description": "OpenAI-兼容接口 baseUrl（示例：https://api.deepseek.com/v1）。"
+        },
+        "ralphLoop.openaiCompatible.model": {
+          "type": "string",
+          "default": "deepseek-chat",
+          "description": "OpenAI-兼容接口模型 id（示例：deepseek-chat / deepseek-reasoner）。"
+        },
+        "ralphLoop.openaiCompatible.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "采样温度（0-2）。"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",
